@@ -2,6 +2,7 @@ use url::Url;
 
 pub mod handlers;
 pub(crate) mod models;
+pub mod sandbox;
 pub mod traits;
 
 pub const NOT_MAINNET_PACKAGE: &str = "<not on mainnet>";
@@ -38,11 +39,12 @@ const TESTNET_PACKAGES: &[&str] = &[
     "0x22be4cade64bf2d02412c7e8d0e8beea2f78828b948118d46735315409371a3c", // Latest
 ];
 
-// Mainnet margin package is not yet deployed - using placeholder
-// This will cause the indexer to fail fast if margin modules are requested on mainnet
-// When the margin package is deployed on mainnet, replace this with the actual address
-const MAINNET_MARGIN_PACKAGES: &[&str] =
-    &["0x97d9473771b01f77b0940c589484184b49f6444627ec121314fae6a6d36fb86b"];
+// Mainnet margin package addresses
+const MAINNET_MARGIN_PACKAGES: &[&str] = &[
+    "0x97d9473771b01f77b0940c589484184b49f6444627ec121314fae6a6d36fb86b",
+    "0xcb4fc91921494ebe6979e201fdb2d67388ffdf6a1b1eb4952526259074de8d0b",
+    "0xfbd322126f1452fd4c89aedbaeb9fd0c44df9b5cedbe70d76bf80dc086031377", // Latest
+];
 const TESTNET_MARGIN_PACKAGES: &[&str] = &[
     "0xb8620c24c9ea1a4a41e79613d2b3d1d93648d1bb6f6b789a7c8f261c94110e4b",
     "0xf978cf2b601c24e40ef82b6e51512b448696b44cb014c0a1162422aa8b9cb811",
@@ -157,6 +159,9 @@ pub fn is_valid_margin_packages(packages: &[&str]) -> bool {
 
 /// Check if margin trading is supported in the given environment
 pub fn is_margin_supported(env: DeepbookEnv) -> bool {
+    if let Some(margin) = sandbox::margin_packages() {
+        return !margin.is_empty();
+    }
     match env {
         DeepbookEnv::Mainnet => is_valid_margin_packages(MAINNET_MARGIN_PACKAGES),
         DeepbookEnv::Testnet => is_valid_margin_packages(TESTNET_MARGIN_PACKAGES),
@@ -165,6 +170,9 @@ pub fn is_margin_supported(env: DeepbookEnv) -> bool {
 
 /// Get the margin package addresses for the given environment
 pub fn get_margin_package_addresses(env: DeepbookEnv) -> &'static [&'static str] {
+    if let Some(margin) = sandbox::margin_packages() {
+        return margin;
+    }
     match env {
         DeepbookEnv::Mainnet => MAINNET_MARGIN_PACKAGES,
         DeepbookEnv::Testnet => TESTNET_MARGIN_PACKAGES,
@@ -173,6 +181,13 @@ pub fn get_margin_package_addresses(env: DeepbookEnv) -> &'static [&'static str]
 
 /// Get the first valid margin package address for the given environment with validation
 pub fn get_margin_package_address(env: DeepbookEnv) -> Result<&'static str, String> {
+    if let Some(margin) = sandbox::margin_packages() {
+        return margin
+            .first()
+            .copied()
+            .ok_or_else(|| "No margin packages configured in sandbox mode".to_string());
+    }
+
     let packages = get_margin_package_addresses(env);
 
     // Find the first valid package
@@ -191,6 +206,9 @@ pub fn get_margin_package_address(env: DeepbookEnv) -> Result<&'static str, Stri
 
 /// Get all core package addresses for the given environment
 pub fn get_core_package_addresses(env: DeepbookEnv) -> &'static [&'static str] {
+    if let Some(core) = sandbox::core_packages() {
+        return core;
+    }
     match env {
         DeepbookEnv::Mainnet => MAINNET_PACKAGES,
         DeepbookEnv::Testnet => TESTNET_PACKAGES,
@@ -214,6 +232,14 @@ impl DeepbookEnv {
 
     /// Get all package addresses (DeepBook + Margin) for this environment
     fn get_all_package_strings(&self) -> Vec<&str> {
+        // If sandbox mode is active, both overrides are set together by init_package_override
+        // (margin may be an empty slice). Use them instead of the hardcoded constants.
+        if let (Some(core), Some(margin)) = (sandbox::core_packages(), sandbox::margin_packages()) {
+            let mut all = core.to_vec();
+            all.extend_from_slice(margin);
+            return all;
+        }
+
         let (packages, margin_packages) = match self {
             DeepbookEnv::Mainnet => (MAINNET_PACKAGES, MAINNET_MARGIN_PACKAGES),
             DeepbookEnv::Testnet => (TESTNET_PACKAGES, TESTNET_MARGIN_PACKAGES),
